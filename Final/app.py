@@ -1,4 +1,5 @@
-from flask import Flask, request, render_template, redirect, url_for
+from flask import Flask, request, render_template, redirect, url_for, jsonify
+from flask_jwt_extended import *
 from dto import UserDTO, BoardDTO
 from dao import UserDAO, BoardDAO
 import datetime
@@ -9,6 +10,12 @@ app = Flask(__name__)
 app.config['RECAPTCHA_SITE_KEY'] = '6LdI60gbAAAAAO9llS8p0UrBetVojtlG-1kuGm-l'
 app.config['RECAPTCHA_SECRET_KEY'] = '6LdI60gbAAAAAPl2g8q9guBs2lFohFUnNNkdpLSQ'
 recaptcha = ReCaptcha(app)
+
+app.config.update(
+    DEBUG=True,
+    JWT_SECRET_KEY="I'M IML"
+)
+jwt = JWTManager(app)
 
 
 @app.route('/', methods=['POST', 'GET'])
@@ -36,30 +43,43 @@ def userinsert():
 
     dto = UserDTO(index_user_counter, request.form.get('user_name'),
                   request.form.get('user_pw'), request.form.get('user_interest'))
-    dao = UserDAO().userinsert(dto)  # 이 dao는 사용이 안됨
+    
+    if UserDAO().userone(request.form.get('user_name'), request.form.get('user_pw')) == True:
+        return jsonify(result='idexist', messege='this id already exists')
+    else:
+        dao = UserDAO().userinsert(dto)
+        return jsonify(result='signup', messege='signup success')
 
-    # print("----77-----")
-
-    return render_template('index.html')
 
 
 @app.route('/login', methods=['post'])
 def userlogin():
     global uname
-    uname = request.form.get('user_name')
-    # print("-"*30)
-    # print(request.form.get('user_name'))
-    # print("-"*30)
+    uname = request.form.get('username')
 
-    return UserDAO().userall()
+    data = UserDAO().userone(request.form.get('username'), request.form.get('userpw'))
+    print(data)
+    if data is False:
+        return jsonify(result='login_fail')
+        
+    else:
+        return jsonify(result = 200, access_token=create_access_token(identity=uname))
 
+
+
+@app.route("/jwtconfirm")
+@jwt_required()   # 참조 사이트에선 () 표현이 누락, 즉 버전에 따른 차이
+def jwt_confirm():
+    cur_user = get_jwt_identity()
+    print(cur_user)
+    return jsonify(id=cur_user, result = 200)
 
 @app.route('/menu', methods=['get'])
 def getmenu():
     return render_template('menu.html')
 
 
-@app.route('/todolist', methods=['get'])
+@app.route('/todolist', methods=['post', 'get'])
 def gettodolist():
     return render_template('todolist.html')
 
@@ -74,56 +94,61 @@ def getchar2():
     return render_template('char2.html')
 
 
-@app.route('/upload')
-def upload():
-    return render_template('upload.html')
+@app.route('/index2', methods=['get'])
+def getchar3():
+    return render_template('index2.html')
+
+
+@app.route('/board', methods=['get'])
+def getchar4():
+    return render_template('board.html')
 
 
 @app.route('/fileUpload', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
         f = request.files['file']
-        # 저장할 경로 + 파일명
         f.save(secure_filename(f.filename))
-        return "현재 디렉토리에 - "+f.filename+" - 업로드 성공!!!"
+    return render_template('menu.html')
 
 
 @app.route('/todolist/gettext', methods=['post'])
+@jwt_required()
 def gettext():
     global index_text_counter
-    global uname
-    # print(f"로그인 된 이름 : {uname}")
-    # print(type(uname))
+    cur_user = get_jwt_identity()
+
     index_text_counter += 1
-    uid = BoardDAO().getuserID(uname)
-    # print(uid)
-    # print(uid[0])
+    dao = BoardDAO()
+    uid = dao.getuserID(cur_user)
     now = datetime.datetime.now()
-    # print(now)
-    # 2021-06-22 12:43:19.673801
+ 
     nowDate = now.strftime('%Y-%m-%d')
-    # print(nowDate)
-    # print(type(nowDate))
+
     dto = BoardDTO(index_text_counter, request.form.get(
         'user_title'), request.form.get('user_text'), nowDate, uid[0])
-    print(dto)
+
     BoardDAO().textinsert(dto)
     return request.form.get('user_title')
 
 
 @app.route('/list/showlist', methods=['post'])
 def showtext():
-    # print("in")
-    global uname
-    print(uname)
-    uid = BoardDAO().getuserID(uname)
-    print(uid[0])
-    data = BoardDAO().boardall(uid[0])
-    # print(data)
+    data = BoardDAO().boardall()
+
     return data
 
+@app.route('/list/showmylist', methods=['post'])
+@jwt_required()
+def showmytext():
+    cur_user = get_jwt_identity()
+
+    uid = BoardDAO().getuserID(cur_user)
+    data = BoardDAO().boardmy(uid[0])
+    
+    return data
 
 if __name__ == "__main__":
-    index_user_counter = 0  # 초기값 받아오는 걸로 수정하기!
-    index_text_counter = 0
+    index_user_counter = UserDAO().getIndex()
+    index_text_counter = BoardDAO().getTextIndex()
     app.run(debug=True, host="127.0.0.1", port="5000")
